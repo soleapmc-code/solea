@@ -9,8 +9,29 @@ async function loadProducts(){if(!configured()){$("products").innerHTML='<div cl
 function renderProducts(){const q=$("search").value.toLowerCase();let list=productsData.filter(p=>(currentCategory==="Todos"||p.category===currentCategory)&&`${p.name} ${p.category} ${p.color||""}`.toLowerCase().includes(q));if($("sort").value==="low")list.sort((a,b)=>a.price-b.price);if($("sort").value==="high")list.sort((a,b)=>b.price-a.price);$("products").innerHTML=list.length?list.map(p=>`<article class="product"><div class="product-photo"><img loading="lazy" src="${esc(p.img)}" alt="${esc(p.name)}" onerror="this.style.display='none'">${p.tag?`<span class="tag">${esc(p.tag)}</span>`:""}</div><div class="product-body"><div class="category">${esc(p.category)} · ${esc(p.color||"")}</div><h3>${esc(p.name)}</h3><div class="price-line"><span class="price">${money(p.price)}</span></div><p class="hint">Consulta disponibilidad de tu talla</p><button class="primary" onclick="openProduct('${p.id}')">Ver detalles y consultar</button></div></article>`).join(""):'<div class="empty">No encontramos productos. Prueba otra búsqueda o categoría.</div>'}
 function openProduct(id){currentProduct=productsData.find(p=>String(p.id)===String(id));if(!currentProduct)return;currentSize=null;const photo=$("pImage"),photoWrap=$("pImageWrap");photo.removeAttribute("src");photoWrap.hidden=true;photo.onerror=()=>{photoWrap.hidden=true};if(currentProduct.img){photo.src=currentProduct.img;photo.alt="Fotografía de "+currentProduct.name;photoWrap.hidden=false}$("pCategory").textContent=currentProduct.category+" · "+(currentProduct.color||"");$("pName").textContent=currentProduct.name;$("pDesc").textContent=currentProduct.desc||"";$("pPrice").textContent=money(currentProduct.price);$("customerNote").value="";renderSizes();openModal("productOverlay")}
 const SIZES=["22","22.5","23","23.5","24","24.5","25","25.5","26","26.5","27"];
-function renderSizes(){$("sizeOptions").innerHTML=SIZES.map(s=>`<button class="size-option ${currentSize===s?"selected":""}" onclick="chooseSize('${s}')">${s}<br><small>Consultar</small></button>`).join("");$("stockMessage").textContent=currentSize?`Talla ${currentSize} seleccionada. La tienda confirmará disponibilidad por WhatsApp.`:"Selecciona una talla para consultar disponibilidad.";$("orderBtn").disabled=!currentSize}
-function chooseSize(s){currentSize=s;renderSizes()}
+async function renderSizes(){
+  const options=$("sizeOptions"), message=$("stockMessage"), order=$("orderBtn");
+  const productId=currentProduct?.id;
+  currentSize=null;
+  options.innerHTML="";
+  order.disabled=true;
+  message.textContent="Consultando tallas disponibles…";
+  if(!productId||!supabaseClient){message.textContent="No se pudieron consultar las tallas disponibles.";return}
+  try{
+    // La función RPC devuelve solo las tallas con cantidad mayor que cero; nunca expone las cantidades.
+    const {data,error}=await supabaseClient.rpc("get_available_sizes",{p_product_id:productId});
+    if(error)throw error;
+    if(!currentProduct||String(currentProduct.id)!==String(productId))return;
+    const available=(data||[]).map(row=>String(row.size)).filter(size=>SIZES.includes(size));
+    if(!available.length){message.textContent="Por el momento no hay tallas disponibles para este modelo.";return}
+    options.innerHTML=available.map(size=>`<button type="button" data-size="${size}" class="size-option ${currentSize===size?"selected":""}" onclick="chooseSize('${size}')">${size}<br><small>Disponible</small></button>`).join("");
+    message.textContent="Selecciona una de las tallas disponibles para consultar por WhatsApp.";
+  }catch(error){
+    console.error("Error al consultar tallas disponibles:",error);
+    if(currentProduct&&String(currentProduct.id)===String(productId))message.textContent="No se pudieron consultar las tallas. Intenta nuevamente más tarde.";
+  }
+}
+function chooseSize(s){if(!$("sizeOptions").querySelector(`button[data-size="${s}"]`))return;currentSize=s;$("sizeOptions").querySelectorAll(".size-option").forEach(b=>b.classList.toggle("selected",b.dataset.size===s));$("stockMessage").textContent=`Talla ${s} seleccionada. La tienda confirmará los detalles por WhatsApp.`;$("orderBtn").disabled=false}
 function orderCurrent(){if(!currentSize||!currentProduct)return;const note=$("customerNote").value.trim();const msg=`Hola, SOLEA. Me interesa este producto:\n• ${currentProduct.name}\n• Categoría: ${currentProduct.category}\n• Color: ${currentProduct.color||"No especificado"}\n• Talla MX: ${currentSize}\n• Precio: ${money(currentProduct.price)}${note?"\n• Nota: "+note:""}\n¿Me confirman disponibilidad y opciones de envío y pago?`;const u=waLink(msg);if(u)window.open(u,"_blank","noopener")}
 function renderSelection(){$("count").textContent=selection.length;$("selectionList").innerHTML=selection.length?selection.map((x,i)=>`<div class="admin-item"><div><strong>${esc(x.name)}</strong><small>Talla ${x.size} · ${money(x.price)}</small></div><button class="secondary danger" onclick="removeSelection(${i})">Quitar</button></div>`).join(""):'<p>Tu selección está vacía. Explora la colección y guarda los modelos que te interesan.</p>';$ ("sendSelection").disabled=!selection.length}
 function removeSelection(i){selection.splice(i,1);renderSelection()}
